@@ -1364,10 +1364,11 @@ export function WidgetForm({
         );
       }
     } catch (error) {
-      showErrorToast(
-        "Failed to import widget",
-        error instanceof Error ? error.message : "Invalid widget JSON",
-      );
+        showErrorToast(
+          "Failed to import widget",
+          "The widget could not be added",
+          "WARNING",
+        );
     }
   };
 
