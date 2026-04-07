@@ -8,7 +8,7 @@ import {
 } from "@/src/components/ui/card";
 import { api } from "@/src/utils/api";
 import {
-  type metricAggregations,
+  metricAggregations,
   getValidAggregationsForMeasureType,
   type QueryType,
   mapLegacyUiTableFilterToView,
@@ -27,7 +27,7 @@ import { WidgetPropertySelectItem } from "@/src/features/widgets/components/Widg
 import { Label } from "@/src/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { viewDeclarations, requiresV2 } from "@/src/features/query/dataModel";
-import { type z } from "zod";
+import { z } from "zod";
 import { views, viewsV2 } from "@/src/features/query/types";
 import { type ViewVersion } from "@/src/features/query";
 import { useV4Beta } from "@/src/features/events/hooks/useV4Beta";
@@ -40,12 +40,13 @@ import {
   toAbsoluteTimeRange,
   type DashboardDateRangeOptions,
 } from "@/src/utils/date-range-utils";
-import { type ColumnDefinition } from "@langfuse/shared";
+import { singleFilter, type ColumnDefinition } from "@langfuse/shared";
 import { Chart } from "@/src/features/widgets/chart-library/Chart";
 import { type DataPoint } from "@/src/features/widgets/chart-library/chart-props";
 import { Button } from "@/src/components/ui/button";
 import { type DashboardWidgetChartType } from "@langfuse/shared/src/db";
 import { showErrorToast } from "@/src/features/notifications/showErrorToast";
+import { showSuccessToast } from "@/src/features/notifications/showSuccessToast";
 import { type FilterState } from "@langfuse/shared";
 import { isTimeSeriesChart } from "@/src/features/widgets/chart-library/utils";
 import {
@@ -64,6 +65,7 @@ import {
   Plus,
   X,
   AlertCircle,
+  Upload,
 } from "lucide-react";
 import {
   buildWidgetName,
@@ -150,6 +152,116 @@ const chartTypes: ChartType[] = [
     supportsBreakdown: true,
   },
 ];
+
+const observationLevelOptions = [
+  { value: "DEBUG" },
+  { value: "DEFAULT" },
+  { value: "WARNING" },
+  { value: "ERROR" },
+];
+
+const widgetImportChartTypes = [
+  "NUMBER",
+  "LINE_TIME_SERIES",
+  "BAR_TIME_SERIES",
+  "AREA_TIME_SERIES",
+  "HORIZONTAL_BAR",
+  "VERTICAL_BAR",
+  "PIE",
+  "HISTOGRAM",
+  "PIVOT_TABLE",
+] as const;
+
+const widgetImportSchema = z
+  .object({
+    name: z.string(),
+    description: z.string(),
+    view: views,
+    dimensions: z.array(
+      z.object({
+        field: z.string(),
+      }),
+    ),
+    metrics: z.array(
+      z.object({
+        measure: z.string(),
+        agg: metricAggregations,
+      }),
+    ),
+    filters: z.array(singleFilter),
+    chartType: z.enum(widgetImportChartTypes),
+    chartConfig: z.object({
+      type: z.enum(widgetImportChartTypes),
+      row_limit: z.number().int().positive().lte(1000).optional(),
+      bins: z.number().int().min(1).max(100).optional(),
+      defaultSort: z
+        .object({
+          column: z.string(),
+          order: z.enum(["ASC", "DESC"]),
+        })
+        .optional(),
+    }),
+    minVersion: z.number().int().optional(),
+  })
+  .passthrough();
+
+function sanitizeImportedFilters(params: {
+  filters: FilterState;
+  allowedValuesByColumn: Map<string, Set<string>>;
+}): { filters: FilterState; removedValues: boolean } {
+  let removedValues = false;
+
+  const filters: FilterState = params.filters.flatMap((filter) => {
+    if (
+      filter.type !== "stringOptions" &&
+      filter.type !== "arrayOptions" &&
+      filter.type !== "categoryOptions"
+    ) {
+      return [filter];
+    }
+
+    const allowedValues = params.allowedValuesByColumn.get(filter.column);
+    if (!allowedValues) {
+      return [filter];
+    }
+
+    const nextValues = filter.value.filter((value) => allowedValues.has(value));
+    if (nextValues.length === filter.value.length) {
+      return [filter];
+    }
+
+    removedValues = true;
+
+    if (nextValues.length === 0) {
+      return [];
+    }
+
+    return [{ ...filter, value: nextValues }];
+  });
+
+  return { filters, removedValues };
+}
+
+function mapNameFiltersToView(
+  view: z.infer<typeof views>,
+  filters: FilterState,
+): FilterState {
+  return filters.map((filter) => {
+    if (filter.column !== "name") {
+      return filter;
+    }
+
+    return {
+      ...filter,
+      column:
+        view === "traces"
+          ? "traceName"
+          : view === "observations"
+            ? "observationName"
+            : "scoreName",
+    };
+  });
+}
 
 /**
  * Pure function that resolves the correct aggregation and chart type given the
@@ -249,6 +361,7 @@ export function WidgetForm({
   widgetId?: string;
 }) {
   const { isBetaEnabled } = useV4Beta();
+  const utils = api.useUtils();
 
   // State for form fields
   const [widgetName, setWidgetName] = useState<string>(initialValues.name);
@@ -261,6 +374,12 @@ export function WidgetForm({
 
   // Disables further auto-updates once the user edits name or description
   const [autoLocked, setAutoLocked] = useState<boolean>(isExistingWidget);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const createWidgetMutation = api.dashboardWidgets.create.useMutation({
+    onSuccess: () => {
+      void utils.dashboardWidgets.invalidate();
+    },
+  });
 
   const [selectedView, setSelectedView] = useState<z.infer<typeof views>>(
     initialValues.view,
@@ -373,21 +492,9 @@ export function WidgetForm({
     }
   };
   const [userFilterState, setUserFilterState] = useState<FilterState>(
-    initialValues.filters?.map((filter) => {
-      if (filter.column === "name") {
-        // We need to map the generic `name` property to the correct column name for the selected view
-        return {
-          ...filter,
-          column:
-            initialValues.view === "traces"
-              ? "traceName"
-              : initialValues.view === "observations"
-                ? "observationName"
-                : "scoreName",
-        };
-      }
-      return filter;
-    }) ?? [],
+    initialValues.filters
+      ? mapNameFiltersToView(initialValues.view, initialValues.filters)
+      : [],
   );
 
   // When beta is toggled on while "traces" is selected (and not editing an
@@ -565,17 +672,11 @@ export function WidgetForm({
   const environmentOptions =
     environmentFilterOptions.data?.map((value) => ({
       value: value.environment,
-    })) || [];
-  const nameOptions = traceFilterOptions.data?.name || [];
-  const tagsOptions = traceFilterOptions.data?.tags || [];
-  const modelOptions = generationsFilterOptions.data?.model || [];
-  const toolNamesOptions = generationsFilterOptions.data?.toolNames || [];
-  const observationLevelOptions = [
-    { value: "DEBUG" },
-    { value: "DEFAULT" },
-    { value: "WARNING" },
-    { value: "ERROR" },
-  ];
+    })) ?? [];
+  const nameOptions = traceFilterOptions.data?.name ?? [];
+  const tagsOptions = traceFilterOptions.data?.tags ?? [];
+  const modelOptions = generationsFilterOptions.data?.model ?? [];
+  const toolNamesOptions = generationsFilterOptions.data?.toolNames ?? [];
 
   // Filter columns for PopoverFilterBuilder
   const filterColumns: ColumnDefinition[] = [
@@ -1038,6 +1139,238 @@ export function WidgetForm({
     ],
   );
 
+  const handleImportWidget = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+
+    if (files.length === 0) {
+      return;
+    }
+
+    const importWidgetFile = async (
+      file: File,
+    ): Promise<
+      | { versionMismatch: true }
+      | {
+          versionMismatch: false;
+          droppedValues: boolean;
+          importedWidget: z.infer<typeof widgetImportSchema>;
+          nextMetrics: {
+            measure: string;
+            agg: z.infer<typeof metricAggregations>;
+          }[];
+          nextDimensions: { field: string }[];
+          filters: FilterState;
+        }
+    > => {
+      const rawContent = await file.text();
+      const importedWidget = widgetImportSchema.parse(JSON.parse(rawContent));
+      const importedMinVersion = importedWidget.minVersion ?? 1;
+      const importedViewVersion: ViewVersion =
+        (isBetaEnabled && importedWidget.view !== "traces") ||
+        importedMinVersion >= 2
+          ? "v2"
+          : "v1";
+
+      if (importedViewVersion !== viewVersion) {
+        return { versionMismatch: true as const };
+      }
+
+      const viewDeclaration =
+        viewDeclarations[importedViewVersion][importedWidget.view];
+
+      const validDimensions = importedWidget.dimensions.filter(
+        (dimension) =>
+          Boolean(viewDeclaration.dimensions[dimension.field]) &&
+          !viewDeclaration.dimensions[dimension.field]?.uiHidden,
+      );
+
+      const validMetrics = importedWidget.metrics.filter((metric) => {
+        const measureDefinition = viewDeclaration.measures[metric.measure];
+        if (!measureDefinition) {
+          return false;
+        }
+
+        return getValidAggregationsForMeasureType(measureDefinition.type).some(
+          (aggregation) => aggregation === metric.agg,
+        );
+      });
+
+      const allowedValuesByColumn = new Map<string, Set<string>>([
+        [
+          "environment",
+          new Set(environmentOptions.map((option) => option.value)),
+        ],
+        ["traceName", new Set(nameOptions.map((option) => option.value))],
+        ["tags", new Set(tagsOptions.map((option) => option.value))],
+        ["toolNames", new Set(toolNamesOptions.map((option) => option.value))],
+      ]);
+
+      if (importedWidget.view === "observations") {
+        allowedValuesByColumn.set(
+          "providedModelName",
+          new Set(modelOptions.map((option) => option.value)),
+        );
+        allowedValuesByColumn.set(
+          "level",
+          new Set(observationLevelOptions.map((option) => option.value)),
+        );
+      }
+
+      const sanitizedFilters = sanitizeImportedFilters({
+        filters: mapNameFiltersToView(
+          importedWidget.view,
+          importedWidget.filters,
+        ),
+        allowedValuesByColumn,
+      });
+
+      const droppedValues =
+        sanitizedFilters.removedValues ||
+        validDimensions.length !== importedWidget.dimensions.length ||
+        validMetrics.length !== importedWidget.metrics.length;
+
+      const nextMetrics =
+        validMetrics.length > 0
+          ? validMetrics
+          : [{ measure: "count", agg: "count" as const }];
+      const nextDimensions =
+        importedWidget.chartType === "PIVOT_TABLE"
+          ? validDimensions
+          : validDimensions.slice(0, 1);
+
+      return {
+        versionMismatch: false as const,
+        droppedValues,
+        importedWidget,
+        nextMetrics,
+        nextDimensions,
+        filters: sanitizedFilters.filters,
+      };
+    };
+
+    try {
+      if (files.length === 1) {
+        const result = await importWidgetFile(files[0]!);
+
+        if (result.versionMismatch) {
+          showErrorToast(
+            "Versions don't match",
+            "The uploaded widget uses a different widget schema version.",
+            "WARNING",
+          );
+          return;
+        }
+
+        setAutoLocked(true);
+        setWidgetName(result.importedWidget.name);
+        setWidgetDescription(result.importedWidget.description);
+        setSelectedView(result.importedWidget.view);
+        setSelectedChartType(result.importedWidget.chartType);
+        setSelectedMeasure(result.nextMetrics[0]?.measure ?? "count");
+        setSelectedAggregation(result.nextMetrics[0]?.agg ?? "count");
+        setSelectedMetrics(
+          result.nextMetrics.map((metric) => ({
+            id: `${metric.agg}_${metric.measure}`,
+            measure: metric.measure,
+            aggregation: metric.agg,
+            label: `${startCase(metric.agg)} ${startCase(metric.measure)}`,
+          })),
+        );
+        setSelectedDimension(result.nextDimensions[0]?.field ?? "none");
+        setPivotDimensions(
+          result.nextDimensions.map((dimension) => dimension.field),
+        );
+        setUserFilterState(result.filters);
+        setRowLimit(result.importedWidget.chartConfig.row_limit ?? 100);
+        setHistogramBins(result.importedWidget.chartConfig.bins ?? 10);
+        setDefaultSortColumn(
+          result.importedWidget.chartConfig.defaultSort?.column ?? "none",
+        );
+        setDefaultSortOrder(
+          result.importedWidget.chartConfig.defaultSort?.order ?? "DESC",
+        );
+
+        showSuccessToast({
+          title: "Widget uploaded successfully",
+          description: "Widget configuration has been loaded.",
+        });
+
+        if (result.droppedValues) {
+          showErrorToast(
+            "Some values could not be added",
+            "Some values could not be added",
+            "WARNING",
+          );
+        }
+        return;
+      }
+
+      let importedCount = 0;
+      let skippedCount = 0;
+      let droppedValuesCount = 0;
+
+      for (const file of files) {
+        try {
+          const result = await importWidgetFile(file);
+          if (result.versionMismatch) {
+            skippedCount += 1;
+            continue;
+          }
+
+          await createWidgetMutation.mutateAsync({
+            projectId,
+            name: result.importedWidget.name,
+            description: result.importedWidget.description,
+            view: result.importedWidget.view,
+            dimensions: result.nextDimensions,
+            metrics: result.nextMetrics,
+            filters: result.filters,
+            chartType: result.importedWidget.chartType,
+            chartConfig: result.importedWidget.chartConfig,
+            minVersion: result.importedWidget.minVersion ?? 1,
+          });
+          importedCount += 1;
+          if (result.droppedValues) {
+            droppedValuesCount += 1;
+          }
+        } catch {
+          skippedCount += 1;
+        }
+      }
+
+      if (importedCount > 0) {
+        showSuccessToast({
+          title: "Widgets uploaded successfully",
+          description: `${importedCount} widget${importedCount === 1 ? "" : "s"} added.`,
+        });
+      }
+
+      if (skippedCount > 0) {
+        showErrorToast(
+          "Some widgets could not be imported",
+          `${skippedCount} file${skippedCount === 1 ? "" : "s"} were skipped.`,
+          "WARNING",
+        );
+      }
+
+      if (droppedValuesCount > 0) {
+        showErrorToast(
+          "Some values could not be added",
+          `${droppedValuesCount} widget${droppedValuesCount === 1 ? "" : "s"} were sanitized during import.`,
+          "WARNING",
+        );
+      }
+    } catch (error) {
+      showErrorToast(
+        "Failed to import widget",
+        error instanceof Error ? error.message : "Invalid widget JSON",
+      );
+    }
+  };
+
   const handleSaveWidget = () => {
     if (!queryValidation.valid) {
       showErrorToast("Invalid query", queryValidation.reason);
@@ -1214,7 +1547,29 @@ export function WidgetForm({
       <div className="h-full w-1/3 min-w-[430px]">
         <Card className="flex h-full flex-col">
           <CardHeader>
-            <CardTitle>Widget Configuration</CardTitle>
+            <div className="flex items-start justify-between gap-3">
+              <CardTitle>Widget Configuration</CardTitle>
+              {!widgetId && (
+                <>
+                  <input
+                    ref={importInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    multiple
+                    className="hidden"
+                    onChange={handleImportWidget}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => importInputRef.current?.click()}
+                  >
+                    <Upload className="mr-2 h-4 w-4" />
+                    Upload
+                  </Button>
+                </>
+              )}
+            </div>
             <CardDescription>
               Configure your widget by selecting data and visualization options
             </CardDescription>

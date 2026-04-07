@@ -12,7 +12,7 @@ import { useDetailPageLists } from "@/src/features/navigate-detail-pages/context
 import startCase from "lodash/startCase";
 import { Button } from "@/src/components/ui/button";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
-import { Trash } from "lucide-react";
+import { Share2, Trash } from "lucide-react";
 import { useState } from "react";
 import {
   Popover,
@@ -93,7 +93,7 @@ export function DeleteWidget({
                 return;
               }
 
-              void mutDeleteWidget.mutateAsync({
+              mutDeleteWidget.mutate({
                 projectId,
                 widgetId,
               });
@@ -105,6 +105,69 @@ export function DeleteWidget({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function buildWidgetJsonFileName(widgetName: string) {
+  const fileSafeName = widgetName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return `${fileSafeName || "widget"}.json`;
+}
+
+function downloadWidgetJson(widget: { name: string }) {
+  const blob = new Blob([JSON.stringify(widget, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = buildWidgetJsonFileName(widget.name);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function ShareWidgetButton({ widgetId }: { widgetId: string }) {
+  const projectId = useProjectIdFromURL();
+  const utils = api.useUtils();
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  return (
+    <Button
+      variant="ghost"
+      size="xs"
+      disabled={!projectId}
+      loading={isDownloading}
+      onClick={async () => {
+        if (!projectId) {
+          return;
+        }
+
+        setIsDownloading(true);
+
+        try {
+          const widget = await utils.dashboardWidgets.get.fetch({
+            projectId,
+            widgetId,
+          });
+          downloadWidgetJson(widget);
+        } catch (error) {
+          showErrorToast(
+            "Failed to download widget",
+            error instanceof Error ? error.message : "Unknown error",
+          );
+        } finally {
+          setIsDownloading(false);
+        }
+      }}
+    >
+      <Share2 className="h-4 w-4" />
+    </Button>
   );
 }
 
@@ -218,7 +281,11 @@ export function DashboardWidgetTable() {
       cell: (row) => {
         const id = row.row.original.id;
         return (
-          <div onClick={(e) => e.stopPropagation()}>
+          <div
+            className="flex items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ShareWidgetButton widgetId={id} />
             <DeleteWidget widgetId={id} owner={row.row.original.owner} />
           </div>
         );
