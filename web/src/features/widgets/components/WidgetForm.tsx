@@ -211,33 +211,37 @@ function sanitizeImportedFilters(params: {
 }): { filters: FilterState; removedValues: boolean } {
   let removedValues = false;
 
-  const filters: FilterState = params.filters.flatMap((filter) => {
-    if (
-      filter.type !== "stringOptions" &&
-      filter.type !== "arrayOptions" &&
-      filter.type !== "categoryOptions"
-    ) {
-      return [filter];
-    }
+  const filters: FilterState = params.filters.flatMap<FilterState[number]>(
+    (filter) => {
+      if (
+        filter.type !== "stringOptions" &&
+        filter.type !== "arrayOptions" &&
+        filter.type !== "categoryOptions"
+      ) {
+        return [filter];
+      }
 
-    const allowedValues = params.allowedValuesByColumn.get(filter.column);
-    if (!allowedValues) {
-      return [filter];
-    }
+      const allowedValues = params.allowedValuesByColumn.get(filter.column);
+      if (!allowedValues) {
+        return [filter];
+      }
 
-    const nextValues = filter.value.filter((value) => allowedValues.has(value));
-    if (nextValues.length === filter.value.length) {
-      return [filter];
-    }
+      const nextValues = filter.value.filter((value) =>
+        allowedValues.has(value),
+      );
+      if (nextValues.length === filter.value.length) {
+        return [filter];
+      }
 
-    removedValues = true;
+      removedValues = true;
 
-    if (nextValues.length === 0) {
-      return [];
-    }
+      if (nextValues.length === 0) {
+        return [];
+      }
 
-    return [{ ...filter, value: nextValues }];
-  });
+      return [{ ...filter, value: nextValues }];
+    },
+  );
 
   return { filters, removedValues };
 }
@@ -1363,12 +1367,12 @@ export function WidgetForm({
           "WARNING",
         );
       }
-    } catch (error) {
-        showErrorToast(
-          "Failed to import widget",
-          "The widget could not be added",
-          "WARNING",
-        );
+    } catch {
+      showErrorToast(
+        "Failed to import widget",
+        "The widget could not be added",
+        "WARNING",
+      );
     }
   };
 
