@@ -14,6 +14,7 @@ import { Button } from "@/src/components/ui/button";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { Share2, Trash } from "lucide-react";
 import { useState } from "react";
+import { downloadWidgetJson } from "@/src/features/widgets/utils/import-export-utils";
 import {
   Popover,
   PopoverContent,
@@ -93,7 +94,7 @@ export function DeleteWidget({
                 return;
               }
 
-              mutDeleteWidget.mutate({
+              void mutDeleteWidget.mutate({
                 projectId,
                 widgetId,
               });
@@ -106,30 +107,6 @@ export function DeleteWidget({
       </PopoverContent>
     </Popover>
   );
-}
-
-function buildWidgetJsonFileName(widgetName: string) {
-  const fileSafeName = widgetName
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return `${fileSafeName || "widget"}.json`;
-}
-
-function downloadWidgetJson(widget: { name: string }) {
-  const blob = new Blob([JSON.stringify(widget, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = buildWidgetJsonFileName(widget.name);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
 }
 
 function ShareWidgetButton({ widgetId }: { widgetId: string }) {
