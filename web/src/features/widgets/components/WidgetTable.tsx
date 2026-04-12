@@ -14,7 +14,10 @@ import { Button } from "@/src/components/ui/button";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
 import { Share2, Trash } from "lucide-react";
 import { useState } from "react";
-import { downloadWidgetJson } from "@/src/features/widgets/utils/import-export-utils";
+import {
+  downloadWidgetJson,
+  widgetImportSchema,
+} from "@/src/features/widgets/utils/import-export-utils";
 import {
   Popover,
   PopoverContent,
@@ -132,7 +135,19 @@ function ShareWidgetButton({ widgetId }: { widgetId: string }) {
             projectId,
             widgetId,
           });
-          downloadWidgetJson(widget);
+
+          const exportWidget = widgetImportSchema.parse({
+            name: widget.name,
+            description: widget.description,
+            view: widget.view,
+            dimensions: widget.dimensions,
+            metrics: widget.metrics,
+            filters: widget.filters,
+            chartType: widget.chartType,
+            chartConfig: widget.chartConfig,
+            minVersion: widget.minVersion,
+          });
+          downloadWidgetJson(exportWidget);
         } catch (error) {
           showErrorToast(
             "Failed to download widget",
