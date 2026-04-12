@@ -10,7 +10,7 @@ import { api } from "@/src/utils/api";
 import {
   observationLevelOptions,
   widgetImportSchema,
-  sanitizeImportedFilters,
+  normalizeImportedFilters,
 } from "@/src/features/widgets/utils/import-export-utils";
 import {
   type metricAggregations,
@@ -157,27 +157,6 @@ const chartTypes: ChartType[] = [
     supportsBreakdown: true,
   },
 ];
-
-function mapNameFiltersToView(
-  view: z.infer<typeof views>,
-  filters: FilterState,
-): FilterState {
-  return filters.map((filter) => {
-    if (filter.column !== "name") {
-      return filter;
-    }
-
-    return {
-      ...filter,
-      column:
-        view === "traces"
-          ? "traceName"
-          : view === "observations"
-            ? "observationName"
-            : "scoreName",
-    };
-  });
-}
 
 /**
  * Pure function that resolves the correct aggregation and chart type given the
@@ -409,7 +388,11 @@ export function WidgetForm({
   };
   const [userFilterState, setUserFilterState] = useState<FilterState>(
     initialValues.filters
-      ? mapNameFiltersToView(initialValues.view, initialValues.filters)
+      ? normalizeImportedFilters({
+          view: initialValues.view,
+          filters: initialValues.filters,
+          allowedValuesByColumn: new Map(),
+        }).filters
       : [],
   );
 
@@ -658,6 +641,7 @@ export function WidgetForm({
       name: "Release",
       id: "release",
       type: "string",
+      aliases: ["traceRelease"],
       internal: "internalValue",
     },
     {
@@ -1135,16 +1119,15 @@ export function WidgetForm({
         );
       }
 
-      const sanitizedFilters = sanitizeImportedFilters({
-        filters: mapNameFiltersToView(
-          importedWidget.view,
-          importedWidget.filters,
-        ),
+      const sanitizedFilters = normalizeImportedFilters({
+        view: importedWidget.view,
+        filters: importedWidget.filters,
         allowedValuesByColumn,
       });
 
       const droppedValues =
         sanitizedFilters.removedValues ||
+        sanitizedFilters.removedFilters ||
         validDimensions.length !== importedWidget.dimensions.length ||
         validMetrics.length !== importedWidget.metrics.length;
 

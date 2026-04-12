@@ -389,7 +389,9 @@ export class QueryBuilder {
         type = "string";
       } else {
         throw new InvalidRequestError(
-          `Invalid filter column ${filter.column}. Must be one of ${Object.keys(view.dimensions)} or ${view.timeDimension}`,
+          `Filter "${filter.column}" is not supported for the widget view. ` +
+            `This usually means the widget was imported from a different view or an older schema version. ` +
+            `Remove or replace that filter and try again.`,
         );
       }
 
