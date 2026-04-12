@@ -13,7 +13,7 @@ import {
   sanitizeImportedFilters,
 } from "@/src/features/widgets/utils/import-export-utils";
 import {
-  metricAggregations,
+  type metricAggregations,
   getValidAggregationsForMeasureType,
   type QueryType,
   mapLegacyUiTableFilterToView,
