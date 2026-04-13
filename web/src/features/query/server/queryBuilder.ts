@@ -389,7 +389,7 @@ export class QueryBuilder {
         type = "string";
       } else {
         throw new InvalidRequestError(
-          `Filter "${filter.column}" is not supported for the widget view. ` +
+          `Invalid filter column: Filter "${filter.column}" is not supported for the widget view. ` +
             `This usually means the widget was imported from a different view or an older schema version. ` +
             `Remove or replace that filter and try again.`,
         );
