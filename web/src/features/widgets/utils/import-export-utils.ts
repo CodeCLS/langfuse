@@ -69,7 +69,7 @@ const widgetImportChartTypes = [
   "PIVOT_TABLE",
 ] as const;
 
-export const widgetImportSchema = z
+const rawWidgetImportSchema = z
   .object({
     name: z.string(),
     description: z.string(),
@@ -101,6 +101,8 @@ export const widgetImportSchema = z
     minVersion: z.number().int().optional(),
   })
   .passthrough();
+
+export const widgetImportSchema = rawWidgetImportSchema;
 
 const supportedWidgetFilterColumnsByView: Record<
   z.infer<typeof views>,
@@ -263,4 +265,63 @@ export function normalizeImportedFilters(params: {
   });
 
   return { filters, removedValues, removedFilters };
+}
+
+const normalizedWidgetImportSchema = rawWidgetImportSchema.superRefine(
+  (widget, ctx) => {
+    if (widget.chartConfig.type !== widget.chartType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["chartConfig", "type"],
+        message: "chartConfig.type must match chartType",
+      });
+    }
+  },
+);
+
+type WidgetImport = z.infer<typeof rawWidgetImportSchema>;
+
+export function normalizeImportedWidget(params: {
+  widget: WidgetImport;
+  allowedValuesByColumn: Map<string, Set<string>>;
+}): {
+  widget: WidgetImport;
+  removedValues: boolean;
+  removedFilters: boolean;
+} {
+  const sanitizedFilters = normalizeImportedFilters({
+    view: params.widget.view,
+    filters: params.widget.filters,
+    allowedValuesByColumn: params.allowedValuesByColumn,
+  });
+
+  return {
+    widget: {
+      ...params.widget,
+      filters: sanitizedFilters.filters,
+    },
+    removedValues: sanitizedFilters.removedValues,
+    removedFilters: sanitizedFilters.removedFilters,
+  };
+}
+
+export function parseAndNormalizeImportedWidget(params: {
+  parsedJson: unknown;
+  allowedValuesByColumn: Map<string, Set<string>>;
+}): {
+  widget: WidgetImport;
+  removedValues: boolean;
+  removedFilters: boolean;
+} {
+  const parsed = rawWidgetImportSchema.parse(params.parsedJson);
+  const normalized = normalizeImportedWidget({
+    widget: parsed,
+    allowedValuesByColumn: params.allowedValuesByColumn,
+  });
+
+  return {
+    widget: normalizedWidgetImportSchema.parse(normalized.widget),
+    removedValues: normalized.removedValues,
+    removedFilters: normalized.removedFilters,
+  };
 }

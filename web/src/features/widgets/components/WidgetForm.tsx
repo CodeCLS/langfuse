@@ -9,8 +9,8 @@ import {
 import { api } from "@/src/utils/api";
 import {
   observationLevelOptions,
-  widgetImportSchema,
-  normalizeImportedFilters,
+  parseAndNormalizeImportedWidget,
+  type widgetImportSchema,
 } from "@/src/features/widgets/utils/import-export-utils";
 import {
   type metricAggregations,
@@ -1066,7 +1066,38 @@ export function WidgetForm({
         }
     > => {
       const rawContent = await file.text();
-      const importedWidget = widgetImportSchema.parse(JSON.parse(rawContent));
+      const parsedJson: unknown = JSON.parse(rawContent);
+      const allowedValuesByColumn = new Map<string, Set<string>>([
+        [
+          "environment",
+          new Set(environmentOptions.map((option) => option.value)),
+        ],
+        ["traceName", new Set(nameOptions.map((option) => option.value))],
+        ["tags", new Set(tagsOptions.map((option) => option.value))],
+        ["toolNames", new Set(toolNamesOptions.map((option) => option.value))],
+      ]);
+
+      if (
+        typeof parsedJson === "object" &&
+        parsedJson !== null &&
+        "view" in parsedJson &&
+        parsedJson.view === "observations"
+      ) {
+        allowedValuesByColumn.set(
+          "providedModelName",
+          new Set(modelOptions.map((option) => option.value)),
+        );
+        allowedValuesByColumn.set(
+          "level",
+          new Set(observationLevelOptions.map((option) => option.value)),
+        );
+      }
+
+      const parsedImport = parseAndNormalizeImportedWidget({
+        parsedJson,
+        allowedValuesByColumn,
+      });
+      const importedWidget = parsedImport.widget;
       const importedMinVersion = importedWidget.minVersion ?? 1;
       const importedViewVersion: ViewVersion =
         (isBetaEnabled && importedWidget.view !== "traces") ||
@@ -1098,36 +1129,9 @@ export function WidgetForm({
         );
       });
 
-      const allowedValuesByColumn = new Map<string, Set<string>>([
-        [
-          "environment",
-          new Set(environmentOptions.map((option) => option.value)),
-        ],
-        ["traceName", new Set(nameOptions.map((option) => option.value))],
-        ["tags", new Set(tagsOptions.map((option) => option.value))],
-        ["toolNames", new Set(toolNamesOptions.map((option) => option.value))],
-      ]);
-
-      if (importedWidget.view === "observations") {
-        allowedValuesByColumn.set(
-          "providedModelName",
-          new Set(modelOptions.map((option) => option.value)),
-        );
-        allowedValuesByColumn.set(
-          "level",
-          new Set(observationLevelOptions.map((option) => option.value)),
-        );
-      }
-
-      const sanitizedFilters = normalizeImportedFilters({
-        view: importedWidget.view,
-        filters: importedWidget.filters,
-        allowedValuesByColumn,
-      });
-
       const droppedValues =
-        sanitizedFilters.removedValues ||
-        sanitizedFilters.removedFilters ||
+        parsedImport.removedValues ||
+        parsedImport.removedFilters ||
         validDimensions.length !== importedWidget.dimensions.length ||
         validMetrics.length !== importedWidget.metrics.length;
 
@@ -1146,7 +1150,7 @@ export function WidgetForm({
         importedWidget,
         nextMetrics,
         nextDimensions,
-        filters: sanitizedFilters.filters,
+        filters: importedWidget.filters,
       };
     };
 
