@@ -9,9 +9,11 @@ import {
 import { api } from "@/src/utils/api";
 import {
   observationLevelOptions,
+  normalizeImportedFilters,
   parseAndNormalizeImportedWidget,
   type widgetImportSchema,
 } from "@/src/features/widgets/utils/import-export-utils";
+import { getWidgetFilterColumns } from "@/src/features/widgets/utils/filter-config";
 import {
   type metricAggregations,
   getValidAggregationsForMeasureType,
@@ -45,7 +47,6 @@ import {
   toAbsoluteTimeRange,
   type DashboardDateRangeOptions,
 } from "@/src/utils/date-range-utils";
-import { type ColumnDefinition } from "@langfuse/shared";
 import { Chart } from "@/src/features/widgets/chart-library/Chart";
 import { type DataPoint } from "@/src/features/widgets/chart-library/chart-props";
 import { Button } from "@/src/components/ui/button";
@@ -598,112 +599,16 @@ export function WidgetForm({
   const modelOptions = generationsFilterOptions.data?.model ?? [];
   const toolNamesOptions = generationsFilterOptions.data?.toolNames ?? [];
 
-  // Filter columns for PopoverFilterBuilder
-  const filterColumns: ColumnDefinition[] = [
-    {
-      name: "Environment",
-      id: "environment",
-      type: "stringOptions",
-      options: environmentOptions,
-      internal: "internalValue",
+  const filterColumns = getWidgetFilterColumns({
+    view: selectedView,
+    options: {
+      environmentOptions,
+      nameOptions,
+      tagsOptions,
+      modelOptions,
+      toolNamesOptions,
     },
-    {
-      name: "Trace Name",
-      id: "traceName",
-      type: "stringOptions",
-      options: nameOptions,
-      internal: "internalValue",
-    },
-    {
-      name: "Observation Name",
-      id: "observationName",
-      type: "string",
-      internal: "internalValue",
-    },
-    {
-      name: "Score Name",
-      id: "scoreName",
-      type: "string",
-      internal: "internalValue",
-    },
-    {
-      name: "Tags",
-      id: "tags",
-      type: "arrayOptions",
-      options: tagsOptions,
-      internal: "internalValue",
-    },
-    {
-      name: "Tool Names",
-      id: "toolNames",
-      type: "arrayOptions",
-      options: toolNamesOptions,
-      internal: "internalValue",
-    },
-    {
-      name: "User",
-      id: "user",
-      type: "string",
-      internal: "internalValue",
-    },
-    {
-      name: "Session",
-      id: "session",
-      type: "string",
-      internal: "internalValue",
-    },
-    {
-      name: "Metadata",
-      id: "metadata",
-      type: "stringObject",
-      internal: "internalValue",
-    },
-    {
-      name: "Release",
-      id: "release",
-      type: "string",
-      aliases: ["traceRelease"],
-      internal: "internalValue",
-    },
-    {
-      name: "Version",
-      id: "version",
-      type: "string",
-      internal: "internalValue",
-    },
-  ];
-  if (selectedView === "observations") {
-    filterColumns.push({
-      name: "Model",
-      id: "providedModelName",
-      type: "stringOptions",
-      options: modelOptions,
-      internal: "internalValue",
-    });
-    filterColumns.push({
-      name: "Level",
-      id: "level",
-      type: "stringOptions",
-      options: observationLevelOptions,
-      internal: "internalValue",
-    });
-  }
-  if (selectedView === "scores-categorical") {
-    filterColumns.push({
-      name: "Score String Value",
-      id: "stringValue",
-      type: "string",
-      internal: "internalValue",
-    });
-  }
-  if (selectedView === "scores-numeric") {
-    filterColumns.push({
-      name: "Score Value",
-      id: "value",
-      type: "number",
-      internal: "internalValue",
-    });
-  }
+  });
 
   // When chart type does not support breakdown, wipe the breakdown dimension
   useEffect(() => {
