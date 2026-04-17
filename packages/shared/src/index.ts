@@ -57,7 +57,6 @@ export * from "./features/comments/types";
 
 // experiments
 export * from "./features/experiments/utils";
-export * from "./features/widgets/schema";
 
 // datasets
 export * from "./features/datasets/validation";

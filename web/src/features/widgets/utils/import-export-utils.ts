@@ -1,31 +1,89 @@
 import { z } from "zod";
 import { views, metricAggregations } from "@/src/features/query/types";
 import { mapLegacyUiTableFilterToView } from "@/src/features/query";
-import { singleFilter } from "@langfuse/shared";
-import { type FilterState } from "@langfuse/shared";
 import {
-  ChartConfigSchema,
-  DashboardWidgetChartTypeSchema,
-  DimensionSchema,
+  DashboardWidgetChartType,
+  singleFilter,
+  type FilterState,
 } from "@langfuse/shared";
 import { getWidgetImportFilterConfig } from "@/src/features/widgets/utils/filter-config";
 export { observationLevelOptions } from "@/src/features/widgets/utils/filter-config";
+
+const dashboardWidgetChartTypeSchema = z.enum(DashboardWidgetChartType);
+
+const widgetDimensionSchema = z.object({
+  field: z.string(),
+});
 
 const widgetMetricSchema = z.object({
   measure: z.string(),
   agg: metricAggregations,
 });
 
+const baseTimeSeriesChartConfig = z.object({});
+const baseTotalValueChartConfig = z.object({
+  row_limit: z.number().int().positive().lte(1000).optional(),
+});
+
+const lineChartTimeSeriesConfig = baseTimeSeriesChartConfig.extend({
+  type: z.literal("LINE_TIME_SERIES"),
+});
+const barChartTimeSeriesConfig = baseTimeSeriesChartConfig.extend({
+  type: z.literal("BAR_TIME_SERIES"),
+});
+const areaChartTimeSeriesConfig = baseTimeSeriesChartConfig.extend({
+  type: z.literal("AREA_TIME_SERIES"),
+});
+
+const horizontalBarChartConfig = baseTotalValueChartConfig.extend({
+  type: z.literal("HORIZONTAL_BAR"),
+  show_value_labels: z.boolean().optional(),
+});
+const verticalBarChartConfig = baseTotalValueChartConfig.extend({
+  type: z.literal("VERTICAL_BAR"),
+});
+const pieChartConfig = baseTotalValueChartConfig.extend({
+  type: z.literal("PIE"),
+});
+const bigNumberChartConfig = baseTotalValueChartConfig.extend({
+  type: z.literal("NUMBER"),
+});
+const histogramChartConfig = baseTotalValueChartConfig.extend({
+  type: z.literal("HISTOGRAM"),
+  bins: z.number().int().min(1).max(100).optional().default(10),
+});
+const pivotTableChartConfig = baseTotalValueChartConfig.extend({
+  type: z.literal("PIVOT_TABLE"),
+  defaultSort: z
+    .object({
+      column: z.string(),
+      order: z.enum(["ASC", "DESC"]),
+    })
+    .optional(),
+});
+
+const chartConfigSchema = z.discriminatedUnion("type", [
+  lineChartTimeSeriesConfig,
+  barChartTimeSeriesConfig,
+  areaChartTimeSeriesConfig,
+  horizontalBarChartConfig,
+  verticalBarChartConfig,
+  pieChartConfig,
+  bigNumberChartConfig,
+  histogramChartConfig,
+  pivotTableChartConfig,
+]);
+
 const widgetImportBaseSchema = z
   .object({
     name: z.string(),
     description: z.string(),
     view: views,
-    dimensions: z.array(DimensionSchema),
+    dimensions: z.array(widgetDimensionSchema),
     metrics: z.array(widgetMetricSchema),
     filters: z.array(singleFilter),
-    chartType: DashboardWidgetChartTypeSchema,
-    chartConfig: ChartConfigSchema,
+    chartType: dashboardWidgetChartTypeSchema,
+    chartConfig: chartConfigSchema,
     minVersion: z.number().int().optional(),
   })
   .passthrough();
@@ -54,7 +112,7 @@ export function downloadWidgetJson(widget: {
   metrics: { measure: string; agg: z.infer<typeof metricAggregations> }[];
   filters: z.infer<typeof singleFilter>[];
   chartType: WidgetImportChartType;
-  chartConfig: z.infer<typeof ChartConfigSchema>;
+  chartConfig: z.infer<typeof chartConfigSchema>;
   minVersion?: number;
 }) {
   const exportWidget = {
