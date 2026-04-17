@@ -72,16 +72,15 @@ const baseWidgetFilterColumns: WidgetFilterColumnDefinition[] = [
   },
   {
     name: "User",
-    id: "user",
+    id: "userId",
     type: "string",
     internal: "internalValue",
   },
   {
     name: "Session",
-    id: "session",
+    id: "sessionId",
     type: "string",
     internal: "internalValue",
-    normalizedId: "sessionId",
   },
   {
     name: "Metadata",
@@ -184,9 +183,9 @@ export function getWidgetImportFilterConfig(view: WidgetView): {
   );
 
   const columnAliases: Record<string, string> = {
-    userId: "user",
-    session: "sessionId",
+    user: "userId",
     sessionId: "sessionId",
+    session: "sessionId",
     traceRelease: "release",
     traceVersion: "version",
   };

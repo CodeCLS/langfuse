@@ -12,7 +12,7 @@ import { useDetailPageLists } from "@/src/features/navigate-detail-pages/context
 import startCase from "lodash/startCase";
 import { Button } from "@/src/components/ui/button";
 import { useHasProjectAccess } from "@/src/features/rbac/utils/checkProjectAccess";
-import { Share2, Trash } from "lucide-react";
+import { Download, Trash } from "lucide-react";
 import { useState } from "react";
 import {
   downloadWidgetJson,
@@ -158,7 +158,7 @@ function ShareWidgetButton({ widgetId }: { widgetId: string }) {
         }
       }}
     >
-      <Share2 className="h-4 w-4" />
+      <Download className="h-4 w-4" />
     </Button>
   );
 }

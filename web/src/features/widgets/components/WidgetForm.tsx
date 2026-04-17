@@ -10,10 +10,12 @@ import { api } from "@/src/utils/api";
 import {
   observationLevelOptions,
   normalizeImportedFilters,
-  parseAndNormalizeImportedWidget,
-  type widgetImportSchema,
+  widgetImportSchema,
 } from "@/src/features/widgets/utils/import-export-utils";
-import { getWidgetFilterColumns } from "@/src/features/widgets/utils/filter-config";
+import {
+  getWidgetFilterColumns,
+  getWidgetImportFilterConfig,
+} from "@/src/features/widgets/utils/filter-config";
 import {
   type metricAggregations,
   getValidAggregationsForMeasureType,
@@ -278,7 +280,6 @@ export function WidgetForm({
   widgetId?: string;
 }) {
   const { isBetaEnabled } = useV4Beta();
-  const utils = api.useUtils();
 
   // State for form fields
   const [widgetName, setWidgetName] = useState<string>(initialValues.name);
@@ -292,11 +293,6 @@ export function WidgetForm({
   // Disables further auto-updates once the user edits name or description
   const [autoLocked, setAutoLocked] = useState<boolean>(isExistingWidget);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const createWidgetMutation = api.dashboardWidgets.create.useMutation({
-    onSuccess: () => {
-      void utils.dashboardWidgets.invalidate();
-    },
-  });
 
   const [selectedView, setSelectedView] = useState<z.infer<typeof views>>(
     initialValues.view,
@@ -969,31 +965,24 @@ export function WidgetForm({
   const handleImportWidget = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    const files = Array.from(event.target.files ?? []);
+    const file = event.target.files?.[0];
     event.target.value = "";
 
-    if (files.length === 0) {
+    if (!file) {
       return;
     }
 
-    const importWidgetFile = async (
-      file: File,
-    ): Promise<
-      | { versionMismatch: true }
-      | {
-          versionMismatch: false;
-          droppedValues: boolean;
-          importedWidget: z.infer<typeof widgetImportSchema>;
-          nextMetrics: {
-            measure: string;
-            agg: z.infer<typeof metricAggregations>;
-          }[];
-          nextDimensions: { field: string }[];
-          filters: FilterState;
-        }
-    > => {
+    const showMalformedImportToast = () =>
+      showErrorToast(
+        "Malformed input",
+        "This operation can't be done due to the malformed input",
+        "WARNING",
+      );
+
+    const importWidgetFile = async (file: File) => {
       const rawContent = await file.text();
       const parsedJson: unknown = JSON.parse(rawContent);
+      const importedWidget = widgetImportSchema.parse(parsedJson);
       const allowedValuesByColumn = new Map<string, Set<string>>([
         [
           "environment",
@@ -1020,11 +1009,6 @@ export function WidgetForm({
         );
       }
 
-      const parsedImport = parseAndNormalizeImportedWidget({
-        parsedJson,
-        allowedValuesByColumn,
-      });
-      const importedWidget = parsedImport.widget;
       const importedMinVersion = importedWidget.minVersion ?? 1;
       const importedViewVersion: ViewVersion =
         (isBetaEnabled && importedWidget.view !== "traces") ||
@@ -1033,19 +1017,19 @@ export function WidgetForm({
           : "v1";
 
       if (importedViewVersion !== viewVersion) {
-        return { versionMismatch: true as const };
+        throw new Error("malformed");
       }
 
       const viewDeclaration =
         viewDeclarations[importedViewVersion][importedWidget.view];
 
-      const validDimensions = importedWidget.dimensions.filter(
+      const dimensionsAreValid = importedWidget.dimensions.every(
         (dimension) =>
           Boolean(viewDeclaration.dimensions[dimension.field]) &&
           !viewDeclaration.dimensions[dimension.field]?.uiHidden,
       );
 
-      const validMetrics = importedWidget.metrics.filter((metric) => {
+      const metricsAreValid = importedWidget.metrics.every((metric) => {
         const measureDefinition = viewDeclaration.measures[metric.measure];
         if (!measureDefinition) {
           return false;
@@ -1056,149 +1040,118 @@ export function WidgetForm({
         );
       });
 
-      const droppedValues =
-        parsedImport.removedValues ||
-        parsedImport.removedFilters ||
-        validDimensions.length !== importedWidget.dimensions.length ||
-        validMetrics.length !== importedWidget.metrics.length;
-
-      const nextMetrics =
-        validMetrics.length > 0
-          ? validMetrics
-          : [{ measure: "count", agg: "count" as const }];
-      const nextDimensions =
+      const dimensionsFitChartType =
         importedWidget.chartType === "PIVOT_TABLE"
-          ? validDimensions
-          : validDimensions.slice(0, 1);
+          ? true
+          : importedWidget.dimensions.length <= 1;
+
+      const { allowedColumns, columnAliases } = getWidgetImportFilterConfig(
+        importedWidget.view,
+      );
+      const normalizedFilters = mapLegacyUiTableFilterToView(
+        importedWidget.view,
+        importedWidget.filters,
+      ).map((filter) => ({
+        ...filter,
+        column: columnAliases[filter.column] ?? filter.column,
+      }));
+
+      const filtersAreValid = normalizedFilters.every((filter) => {
+        if (!allowedColumns.has(filter.column)) {
+          return false;
+        }
+
+        if (
+          filter.type !== "stringOptions" &&
+          filter.type !== "arrayOptions" &&
+          filter.type !== "categoryOptions"
+        ) {
+          return true;
+        }
+
+        const allowedValues = allowedValuesByColumn.get(filter.column);
+        if (!allowedValues) {
+          return true;
+        }
+
+        return filter.value.every((value) => allowedValues.has(value));
+      });
+
+      if (
+        !dimensionsAreValid ||
+        !metricsAreValid ||
+        !dimensionsFitChartType ||
+        !filtersAreValid
+      ) {
+        throw new Error("malformed");
+      }
 
       return {
-        versionMismatch: false as const,
-        droppedValues,
         importedWidget,
-        nextMetrics,
-        nextDimensions,
-        filters: importedWidget.filters,
+        filters: normalizedFilters,
       };
     };
 
     try {
-      if (files.length === 1) {
-        const result = await importWidgetFile(files[0]!);
+      const result = await importWidgetFile(file);
 
-        if (result.versionMismatch) {
-          showErrorToast(
-            "Versions don't match",
-            "The uploaded widget uses a different widget schema version.",
-            "WARNING",
-          );
-          return;
-        }
+      const importedMetrics =
+        result.importedWidget.metrics.length > 0
+          ? result.importedWidget.metrics
+          : [{ measure: "count", agg: "count" as const }];
+      const importedDimensions =
+        result.importedWidget.chartType === "PIVOT_TABLE"
+          ? result.importedWidget.dimensions
+          : result.importedWidget.dimensions.slice(0, 1);
 
-        setAutoLocked(true);
-        setWidgetName(result.importedWidget.name);
-        setWidgetDescription(result.importedWidget.description);
-        setSelectedView(result.importedWidget.view);
-        setSelectedChartType(result.importedWidget.chartType);
-        setSelectedMeasure(result.nextMetrics[0]?.measure ?? "count");
-        setSelectedAggregation(result.nextMetrics[0]?.agg ?? "count");
-        setSelectedMetrics(
-          result.nextMetrics.map((metric) => ({
-            id: `${metric.agg}_${metric.measure}`,
-            measure: metric.measure,
-            aggregation: metric.agg,
-            label: `${startCase(metric.agg)} ${startCase(metric.measure)}`,
-          })),
-        );
-        setSelectedDimension(result.nextDimensions[0]?.field ?? "none");
-        setPivotDimensions(
-          result.nextDimensions.map((dimension) => dimension.field),
-        );
-        setUserFilterState(result.filters);
-        setRowLimit(result.importedWidget.chartConfig.row_limit ?? 100);
-        setHistogramBins(result.importedWidget.chartConfig.bins ?? 10);
-        setDefaultSortColumn(
-          result.importedWidget.chartConfig.defaultSort?.column ?? "none",
-        );
-        setDefaultSortOrder(
-          result.importedWidget.chartConfig.defaultSort?.order ?? "DESC",
-        );
-
-        showSuccessToast({
-          title: "Widget uploaded successfully",
-          description: "Widget configuration has been loaded.",
-        });
-
-        if (result.droppedValues) {
-          showErrorToast(
-            "Some values could not be added",
-            "Some values could not be added",
-            "WARNING",
-          );
-        }
-        return;
-      }
-
-      let importedCount = 0;
-      let skippedCount = 0;
-      let droppedValuesCount = 0;
-
-      for (const file of files) {
-        try {
-          const result = await importWidgetFile(file);
-          if (result.versionMismatch) {
-            skippedCount += 1;
-            continue;
-          }
-
-          await createWidgetMutation.mutateAsync({
-            projectId,
-            name: result.importedWidget.name,
-            description: result.importedWidget.description,
-            view: result.importedWidget.view,
-            dimensions: result.nextDimensions,
-            metrics: result.nextMetrics,
-            filters: result.filters,
-            chartType: result.importedWidget.chartType,
-            chartConfig: result.importedWidget.chartConfig,
-            minVersion: result.importedWidget.minVersion ?? 1,
-          });
-          importedCount += 1;
-          if (result.droppedValues) {
-            droppedValuesCount += 1;
-          }
-        } catch {
-          skippedCount += 1;
-        }
-      }
-
-      if (importedCount > 0) {
-        showSuccessToast({
-          title: "Widgets uploaded successfully",
-          description: `${importedCount} widget${importedCount === 1 ? "" : "s"} added.`,
-        });
-      }
-
-      if (skippedCount > 0) {
-        showErrorToast(
-          "Some widgets could not be imported",
-          `${skippedCount} file${skippedCount === 1 ? "" : "s"} were skipped.`,
-          "WARNING",
-        );
-      }
-
-      if (droppedValuesCount > 0) {
-        showErrorToast(
-          "Some values could not be added",
-          `${droppedValuesCount} widget${droppedValuesCount === 1 ? "" : "s"} were sanitized during import.`,
-          "WARNING",
-        );
-      }
-    } catch {
-      showErrorToast(
-        "Failed to import widget",
-        "The widget could not be added",
-        "WARNING",
+      setAutoLocked(true);
+      setWidgetName(result.importedWidget.name);
+      setWidgetDescription(result.importedWidget.description);
+      setSelectedView(result.importedWidget.view);
+      setSelectedChartType(result.importedWidget.chartType);
+      setSelectedMeasure(importedMetrics[0]?.measure ?? "count");
+      setSelectedAggregation(importedMetrics[0]?.agg ?? "count");
+      setSelectedMetrics(
+        importedMetrics.map((metric) => ({
+          id: `${metric.agg}_${metric.measure}`,
+          measure: metric.measure,
+          aggregation: metric.agg,
+          label: `${startCase(metric.agg)} ${startCase(metric.measure)}`,
+        })),
       );
+      setSelectedDimension(importedDimensions[0]?.field ?? "none");
+      setPivotDimensions(
+        importedDimensions.map((dimension) => dimension.field),
+      );
+      setUserFilterState(result.filters);
+      const importedChartConfig = result.importedWidget.chartConfig;
+      setRowLimit(
+        "row_limit" in importedChartConfig
+          ? (importedChartConfig.row_limit ?? 100)
+          : 100,
+      );
+      setHistogramBins(
+        importedChartConfig.type === "HISTOGRAM"
+          ? (importedChartConfig.bins ?? 10)
+          : 10,
+      );
+      setDefaultSortColumn(
+        importedChartConfig.type === "PIVOT_TABLE"
+          ? (importedChartConfig.defaultSort?.column ?? "none")
+          : "none",
+      );
+      setDefaultSortOrder(
+        importedChartConfig.type === "PIVOT_TABLE"
+          ? (importedChartConfig.defaultSort?.order ?? "DESC")
+          : "DESC",
+      );
+
+      showSuccessToast({
+        title: "Widget uploaded successfully",
+        description: "Widget configuration has been loaded.",
+      });
+    } catch {
+      showMalformedImportToast();
     }
   };
 
@@ -1386,7 +1339,6 @@ export function WidgetForm({
                     ref={importInputRef}
                     type="file"
                     accept="application/json,.json"
-                    multiple
                     className="hidden"
                     onChange={handleImportWidget}
                   />
@@ -1396,7 +1348,7 @@ export function WidgetForm({
                     onClick={() => importInputRef.current?.click()}
                   >
                     <Upload className="mr-2 h-4 w-4" />
-                    Upload
+                    Import
                   </Button>
                 </>
               )}

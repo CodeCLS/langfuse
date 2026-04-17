@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { views, type metricAggregations } from "@/src/features/query/types";
+import { views, metricAggregations } from "@/src/features/query/types";
 import { mapLegacyUiTableFilterToView } from "@/src/features/query";
 import { singleFilter } from "@langfuse/shared";
 import { type FilterState } from "@langfuse/shared";
@@ -7,10 +7,14 @@ import {
   ChartConfigSchema,
   DashboardWidgetChartTypeSchema,
   DimensionSchema,
-  MetricSchema,
 } from "@langfuse/shared";
 import { getWidgetImportFilterConfig } from "@/src/features/widgets/utils/filter-config";
 export { observationLevelOptions } from "@/src/features/widgets/utils/filter-config";
+
+const widgetMetricSchema = z.object({
+  measure: z.string(),
+  agg: metricAggregations,
+});
 
 const widgetImportBaseSchema = z
   .object({
@@ -18,7 +22,7 @@ const widgetImportBaseSchema = z
     description: z.string(),
     view: views,
     dimensions: z.array(DimensionSchema),
-    metrics: z.array(MetricSchema),
+    metrics: z.array(widgetMetricSchema),
     filters: z.array(singleFilter),
     chartType: DashboardWidgetChartTypeSchema,
     chartConfig: ChartConfigSchema,
