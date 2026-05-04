@@ -86,13 +86,13 @@ const widgetImportBaseSchema = z
     chartConfig: chartConfigSchema,
     minVersion: z.number().int().optional(),
   })
-  .passthrough();
+  .loose();
 
 export const widgetImportSchema = widgetImportBaseSchema.superRefine(
   (widget, ctx) => {
     if (widget.chartConfig.type !== widget.chartType) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["chartConfig", "type"],
         message: "chartConfig.type must match chartType",
       });

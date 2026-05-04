@@ -9,13 +9,8 @@ import {
 import { api } from "@/src/utils/api";
 import {
   observationLevelOptions,
-  normalizeImportedFilters,
-  widgetImportSchema,
+  parseAndNormalizeImportedWidget,
 } from "@/src/features/widgets/utils/import-export-utils";
-import {
-  getWidgetFilterColumns,
-  getWidgetImportFilterConfig,
-} from "@/src/features/widgets/utils/filter-config";
 import {
   type metricAggregations,
   getValidAggregationsForMeasureType,
@@ -687,12 +682,6 @@ export function WidgetForm({
   const toolNamesOptions = generationsFilterOptions.data?.toolNames || [];
   const calledToolNamesOptions =
     generationsFilterOptions.data?.calledToolNames || [];
-  const observationLevelOptions = [
-    { value: "DEBUG" },
-    { value: "DEFAULT" },
-    { value: "WARNING" },
-    { value: "ERROR" },
-  ];
 
   const filterColumns = getWidgetFilterColumns({
     selectedView,
@@ -1101,7 +1090,6 @@ export function WidgetForm({
     const importWidgetFile = async (file: File) => {
       const rawContent = await file.text();
       const parsedJson: unknown = JSON.parse(rawContent);
-      const importedWidget = widgetImportSchema.parse(parsedJson);
       const allowedValuesByColumn = new Map<string, Set<string>>([
         [
           "environment",
@@ -1128,16 +1116,21 @@ export function WidgetForm({
         );
       }
 
+      const {
+        widget: importedWidget,
+        removedValues,
+        removedFilters,
+      } = parseAndNormalizeImportedWidget({
+        parsedJson,
+        allowedValuesByColumn,
+      });
+
       const importedMinVersion = importedWidget.minVersion ?? 1;
       const importedViewVersion: ViewVersion =
         (isBetaEnabled && importedWidget.view !== "traces") ||
         importedMinVersion >= 2
           ? "v2"
           : "v1";
-
-      if (importedViewVersion !== viewVersion) {
-        throw new Error("malformed");
-      }
 
       const viewDeclaration =
         viewDeclarations[importedViewVersion][importedWidget.view];
@@ -1164,50 +1157,15 @@ export function WidgetForm({
           ? true
           : importedWidget.dimensions.length <= 1;
 
-      const { allowedColumns, columnAliases } = getWidgetImportFilterConfig(
-        importedWidget.view,
-      );
-      const normalizedFilters = mapLegacyUiTableFilterToView(
-        importedWidget.view,
-        importedWidget.filters,
-      ).map((filter) => ({
-        ...filter,
-        column: columnAliases[filter.column] ?? filter.column,
-      }));
-
-      const filtersAreValid = normalizedFilters.every((filter) => {
-        if (!allowedColumns.has(filter.column)) {
-          return false;
-        }
-
-        if (
-          filter.type !== "stringOptions" &&
-          filter.type !== "arrayOptions" &&
-          filter.type !== "categoryOptions"
-        ) {
-          return true;
-        }
-
-        const allowedValues = allowedValuesByColumn.get(filter.column);
-        if (!allowedValues) {
-          return true;
-        }
-
-        return filter.value.every((value) => allowedValues.has(value));
-      });
-
-      if (
-        !dimensionsAreValid ||
-        !metricsAreValid ||
-        !dimensionsFitChartType ||
-        !filtersAreValid
-      ) {
+      if (!dimensionsAreValid || !metricsAreValid || !dimensionsFitChartType) {
         throw new Error("malformed");
       }
 
       return {
         importedWidget,
-        filters: normalizedFilters,
+        filters: importedWidget.filters,
+        removedValues,
+        removedFilters,
       };
     };
 
@@ -1269,6 +1227,14 @@ export function WidgetForm({
         title: "Widget uploaded successfully",
         description: "Widget configuration has been loaded.",
       });
+
+      if (result.removedValues || result.removedFilters) {
+        showErrorToast(
+          "Widget filters were adjusted",
+          "Some imported filters or filter values were removed because they are not available in this project.",
+          "WARNING",
+        );
+      }
     } catch {
       showMalformedImportToast();
     }
