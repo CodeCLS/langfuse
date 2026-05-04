@@ -101,18 +101,16 @@ export const widgetImportSchema = widgetImportBaseSchema.superRefine(
 );
 
 type WidgetImport = z.infer<typeof widgetImportSchema>;
-type WidgetImportChartType = WidgetImport["chartType"];
-type WidgetView = z.infer<typeof views>;
 
 export function downloadWidgetJson(widget: {
   name: string;
   description: string;
-  view: WidgetView;
+  view: string;
   dimensions: { field: string }[];
-  metrics: { measure: string; agg: z.infer<typeof metricAggregations> }[];
+  metrics: { measure: string; agg: string }[];
   filters: z.infer<typeof singleFilter>[];
-  chartType: WidgetImportChartType;
-  chartConfig: z.infer<typeof chartConfigSchema>;
+  chartType: string;
+  chartConfig: unknown;
   minVersion?: number;
 }) {
   const exportWidget = {
