@@ -1090,15 +1090,45 @@ export function WidgetForm({
     const importWidgetFile = async (file: File) => {
       const rawContent = await file.text();
       const parsedJson: unknown = JSON.parse(rawContent);
-      const allowedValuesByColumn = new Map<string, Set<string>>([
-        [
+      const allowedValuesByColumn = new Map<string, Set<string>>();
+
+      if (environmentFilterOptions.data !== undefined) {
+        allowedValuesByColumn.set(
           "environment",
-          new Set(environmentOptions.map((option) => option.value)),
-        ],
-        ["traceName", new Set(nameOptions.map((option) => option.value))],
-        ["tags", new Set(tagsOptions.map((option) => option.value))],
-        ["toolNames", new Set(toolNamesOptions.map((option) => option.value))],
-      ]);
+          new Set(
+            environmentFilterOptions.data.map((option) => option.environment),
+          ),
+        );
+      }
+
+      if (traceFilterOptions.data?.name !== undefined) {
+        allowedValuesByColumn.set(
+          "traceName",
+          new Set(
+            normalizeSingleValueOptions(traceFilterOptions.data.name).map(
+              (option) => option.value,
+            ),
+          ),
+        );
+      }
+
+      if (traceFilterOptions.data?.tags !== undefined) {
+        allowedValuesByColumn.set(
+          "tags",
+          new Set(traceFilterOptions.data.tags.map((option) => option.value)),
+        );
+      }
+
+      if (generationsFilterOptions.data?.toolNames !== undefined) {
+        allowedValuesByColumn.set(
+          "toolNames",
+          new Set(
+            generationsFilterOptions.data.toolNames.map(
+              (option) => option.value,
+            ),
+          ),
+        );
+      }
 
       if (
         typeof parsedJson === "object" &&
@@ -1106,10 +1136,14 @@ export function WidgetForm({
         "view" in parsedJson &&
         parsedJson.view === "observations"
       ) {
-        allowedValuesByColumn.set(
-          "providedModelName",
-          new Set(modelOptions.map((option) => option.value)),
-        );
+        if (generationsFilterOptions.data?.model !== undefined) {
+          allowedValuesByColumn.set(
+            "providedModelName",
+            new Set(
+              generationsFilterOptions.data.model.map((option) => option.value),
+            ),
+          );
+        }
         allowedValuesByColumn.set(
           "level",
           new Set(observationLevelOptions.map((option) => option.value)),
@@ -1200,7 +1234,12 @@ export function WidgetForm({
       setPivotDimensions(
         importedDimensions.map((dimension) => dimension.field),
       );
-      setUserFilterState(result.filters);
+      setUserFilterState(
+        normalizeStoredWidgetFiltersForEditor(
+          result.importedWidget.view,
+          result.filters,
+        ).editorFilters,
+      );
       const importedChartConfig = result.importedWidget.chartConfig;
       setRowLimit(
         "row_limit" in importedChartConfig

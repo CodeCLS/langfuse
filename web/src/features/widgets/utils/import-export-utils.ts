@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { views, metricAggregations } from "@/src/features/query/types";
-import { mapLegacyUiTableFilterToView } from "@/src/features/query";
+import {
+  getWidgetImportFilterConfig,
+  mapLegacyUiTableFilterToView,
+} from "@/src/features/query";
 import {
   DashboardWidgetChartType,
   singleFilter,
   type FilterState,
 } from "@langfuse/shared";
-import { getWidgetImportFilterConfig } from "@/src/features/widgets/utils/filter-config";
 export { observationLevelOptions } from "@/src/features/widgets/utils/filter-config";
 
 const dashboardWidgetChartTypeSchema = z.enum(DashboardWidgetChartType);
