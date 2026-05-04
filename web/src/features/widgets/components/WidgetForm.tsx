@@ -1102,14 +1102,13 @@ export function WidgetForm({
       }
 
       if (traceFilterOptions.data?.name !== undefined) {
-        allowedValuesByColumn.set(
-          "traceName",
-          new Set(
-            normalizeSingleValueOptions(traceFilterOptions.data.name).map(
-              (option) => option.value,
-            ),
+        const traceNameValues = new Set(
+          normalizeSingleValueOptions(traceFilterOptions.data.name).map(
+            (option) => option.value,
           ),
         );
+        allowedValuesByColumn.set("traceName", traceNameValues);
+        allowedValuesByColumn.set("name", traceNameValues);
       }
 
       if (traceFilterOptions.data?.tags !== undefined) {
