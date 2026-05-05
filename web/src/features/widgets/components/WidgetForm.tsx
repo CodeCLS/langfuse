@@ -1135,6 +1135,16 @@ export function WidgetForm({
         "view" in parsedJson &&
         parsedJson.view === "observations"
       ) {
+        if (generationsFilterOptions.data?.calledToolNames !== undefined) {
+          allowedValuesByColumn.set(
+            "calledToolNames",
+            new Set(
+              generationsFilterOptions.data.calledToolNames.map(
+                (option) => option.value,
+              ),
+            ),
+          );
+        }
         if (generationsFilterOptions.data?.model !== undefined) {
           allowedValuesByColumn.set(
             "providedModelName",
